@@ -1,0 +1,92 @@
+
+name: Deploy Baby Store to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy through AWS Systems Manager
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::316286256252:role/GitHubActions-BabyStore-Deploy
+          aws-region: ap-south-1
+          role-session-name: BabyStoreGitHubDeploy
+
+      - name: Deploy application on EC2
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DEPLOY_SCRIPT=$(cat <<'SCRIPT'
+          set -eu
+
+          sudo -u ec2-user bash -lc 'cd /home/ec2-user/babystore && git fetch origin main && git reset --hard origin/main'
+
+          cd /home/ec2-user/babystore
+
+          docker compose -f docker-compose.prod.yml build app
+          docker compose -f docker-compose.prod.yml up -d
+
+          docker compose -f docker-compose.prod.yml exec -T app php artisan migrate --force
+          docker compose -f docker-compose.prod.yml exec -T app php artisan optimize:clear
+
+          curl -fsS http://localhost/api/products
+          SCRIPT
+          )
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "i-040d28857f86a48c4" \
+            --document-name "AWS-RunShellScript" \
+            --comment "GitHub Actions Baby Store deployment" \
+            --timeout-seconds 900 \
+            --parameters "$(jq -cn --arg cmd "$DEPLOY_SCRIPT" '{commands:[$cmd]}')" \
+            --query "Command.CommandId" \
+            --output text)
+
+          echo "SSM command ID: $COMMAND_ID"
+
+          for attempt in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "i-040d28857f86a48c4" \
+              --query "Status" \
+              --output text 2>/dev/null || true)
+
+            echo "Deployment status: ${STATUS:-Pending}"
+
+            case "$STATUS" in
+              Success)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "i-040d28857f86a48c4" \
+                  --query "StandardOutputContent" \
+                  --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "i-040d28857f86a48c4" \
+                  --query "StandardErrorContent" \
+                  --output text || true
+                exit 1
+                ;;
+            esac
+
+            sleep 5
+          done
+
+          echo "Timed out waiting for the EC2 deployment."
+          exit 1
