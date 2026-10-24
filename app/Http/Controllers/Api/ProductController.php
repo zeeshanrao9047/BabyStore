@@ -13,31 +13,66 @@ use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 class ProductController extends Controller
 {
- public function index(Request $request): JsonResponse
+public function index(Request $request): JsonResponse
 {
-    // 1. Get validated/request inputs (no $validated variable was defined)
-    $sortBy = $request->input('sort_by', 'created_at');
-    $sortOrder = $request->input('sort_order', 'desc');
-    $perPage = (int) $request->input('per_page', 10);
+    $validated = $request->validate([
+        'search' => ['nullable', 'string', 'max:100'],
+        'min_price' => ['nullable', 'numeric', 'min:0'],
+        'max_price' => ['nullable', 'numeric', 'min:0'],
+        'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        'sort_by' => [
+            'sometimes',
+            'in:id,name,price,created_at,updated_at',
+        ],
+        'sort_order' => ['sometimes', 'in:asc,desc'],
+    ]);
 
-    // 2. Whitelist sort columns/orders to prevent SQL injection
-    $allowedSortColumns = ['id', 'name', 'price', 'created_at', 'updated_at'];
-    $allowedSortOrders = ['asc', 'desc'];
-
-    if (!in_array($sortBy, $allowedSortColumns, true)) {
-        $sortBy = 'created_at';
+    if (
+        isset($validated['min_price'], $validated['max_price']) &&
+        $validated['max_price'] < $validated['min_price']
+    ) {
+        return response()->json([
+            'success' => false,
+            'message' => 'max_price must be greater than or equal to min_price.',
+            'errors' => [
+                'max_price' => [
+                    'The max price must be greater than or equal to the min price.',
+                ],
+            ],
+        ], 422);
     }
-    if (!in_array(strtolower($sortOrder), $allowedSortOrders, true)) {
-        $sortOrder = 'desc';
+
+    $sortBy = $validated['sort_by'] ?? 'created_at';
+    $sortOrder = $validated['sort_order'] ?? 'desc';
+    $perPage = (int) ($validated['per_page'] ?? 10);
+
+    $query = Products::query()
+        ->where('is_active', true);
+
+    if (!empty($validated['search'])) {
+        $search = mb_strtolower($validated['search']);
+        $term = '%' . $search . '%';
+
+        $query->where(function ($q) use ($term) {
+            $q->whereRaw('LOWER(name) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(slug) LIKE ?', [$term])
+                ->orWhereRaw('LOWER(description) LIKE ?', [$term]);
+        });
     }
 
-    // 3. Build a SINGLE query (the previous code had two conflicting $products assignments
-    //    and referenced an undefined $query variable)
-    $products = Products::where('is_active', true)
+    if (isset($validated['min_price'])) {
+        $query->where('price', '>=', $validated['min_price']);
+    }
+
+    if (isset($validated['max_price'])) {
+        $query->where('price', '<=', $validated['max_price']);
+    }
+
+    $products = $query
         ->orderBy($sortBy, $sortOrder)
-        ->paginate($perPage);
+        ->paginate($perPage)
+        ->withQueryString();
 
-    // 4. Return properly-formed JSON (missing closing brackets/parentheses fixed)
     return response()->json([
         'success' => true,
         'message' => 'Products fetched successfully.',

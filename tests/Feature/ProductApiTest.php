@@ -114,4 +114,67 @@ class ProductApiTest extends TestCase
               'stock',
           ]);
     }
+
+public function test_product_list_can_search_by_name(): void
+{
+    $this->createProduct([
+        'name' => 'Unique Cotton Shirt',
+        'slug' => 'unique-cotton-shirt',
+    ]);
+
+    $this->createProduct([
+        'name' => 'Winter Blanket',
+        'slug' => 'winter-blanket',
+    ]);
+
+    $this->getJson('/api/products?search=unique')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.name', 'Unique Cotton Shirt');
+}
+public function test_product_list_can_filter_by_price_range(): void
+{
+    $this->createProduct([
+        'name' => 'Budget Shirt',
+        'slug' => 'budget-shirt',
+        'price' => 200,
+    ]);
+
+    $this->createProduct([
+        'name' => 'Premium Dress',
+        'slug' => 'premium-dress',
+        'price' => 800,
+    ]);
+
+    $this->getJson('/api/products?min_price=300&max_price=900')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.name', 'Premium Dress');
+}
+
+public function test_product_list_can_limit_page_size(): void
+{
+    $this->createProduct();
+    $this->createProduct([
+        'name' => 'Baby Blanket',
+        'slug' => 'baby-blanket',
+    ]);
+
+    $this->getJson('/api/products?per_page=1')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('pagination.per_page', 1)
+        ->assertJsonPath('pagination.total', 2);
+}
+
+public function test_product_list_rejects_invalid_filters(): void
+{
+    $this->getJson('/api/products?per_page=1000')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['per_page']);
+
+    $this->getJson('/api/products?min_price=900&max_price=100')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['max_price']);
+}
 }
