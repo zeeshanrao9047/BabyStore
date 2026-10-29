@@ -4,7 +4,7 @@ namespace Tests\Feature;
 use App\Models\Products;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
-
+use App\Models\User;
 class ProductApiTest extends TestCase
 {
     use RefreshDatabase;
@@ -21,6 +21,14 @@ class ProductApiTest extends TestCase
             'is_active' => true,
         ], $overrides));
     }
+    private function actingAsAdmin(): void
+{
+    $admin = User::factory()->create([
+        'is_admin' => true,
+    ]);
+
+    $this->actingAs($admin, 'sanctum');
+}
 
     public function test_product_list_returns_active_products(): void
     {
@@ -52,6 +60,7 @@ class ProductApiTest extends TestCase
 
     public function test_product_can_be_created(): void
     {
+        $this->actingAsAdmin();
         $response = $this->postJson('/api/products', [
             'name' => 'Baby Summer Dress',
             'slug' => 'baby-summer-dress',
@@ -72,6 +81,7 @@ class ProductApiTest extends TestCase
 
     public function test_product_can_be_updated(): void
     {
+        $this->actingAsAdmin();
         $product = $this->createProduct();
 
         $this->patchJson('/api/products/' . $product->id, [
@@ -88,6 +98,7 @@ class ProductApiTest extends TestCase
 
     public function test_product_can_be_deleted(): void
     {
+        $this->actingAsAdmin();
         $product = $this->createProduct();
 
         $this->deleteJson('/api/products/' . $product->id)
@@ -101,6 +112,7 @@ class ProductApiTest extends TestCase
 
     public function test_product_creation_requires_valid_data(): void
     {
+        $this->actingAsAdmin();
         $this->postJson('/api/products', [
             'name' => '',
             'slug' => '',
