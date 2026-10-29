@@ -3,7 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-
+use App\Models\Category;
+use illuminate\Database\Eloquent\Relations\BelongsTo;
 class Products extends Model
 {
     protected $fillable = [
@@ -14,6 +15,7 @@ class Products extends Model
         'stock',
         'image',
         'is_active',
+        'category_id',
     ];
 
     protected function casts(): array
@@ -24,4 +26,9 @@ class Products extends Model
             'is_active' => 'boolean',
         ];
     }
+
+    public function category(): BelongsTo
+{
+    return $this->belongsTo(Category::class);
+}
 }
